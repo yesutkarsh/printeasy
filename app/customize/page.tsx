@@ -155,7 +155,7 @@ export default function Customize() {
     try {
       await updateDoc(doc(db, "uploadSessions", sessionId), {
         customizations,
-        totalPrice: subtotal,
+        totalPrice: subtotal+DELIVERY_FEE,
         updatedAt: new Date().toISOString(),
         status: "customized",
       })
@@ -163,7 +163,7 @@ export default function Customize() {
         sessionId,
         files,
         customizations,
-        totalPrice: subtotal,
+        totalPrice: subtotal+DELIVERY_FEE,
         timestamp: new Date().toISOString(),
       }
       const cart = JSON.parse(localStorage.getItem("cart") || "[]")

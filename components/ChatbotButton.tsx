@@ -294,7 +294,7 @@ export default function ChatbotButton() {
           {/* Chat Button */}
           <button
             onClick={() => setIsOpen(!isOpen)}
-            className={`fixed bottom-5 right-4 z-50 rounded-full shadow-lg p-4 ${
+            className={`fixed bottom-[70px] right-4 z-50 rounded-full shadow-lg p-4 ${
               isOpen ? "bg-red-500 text-white" : "bg-yellow-400 text-gray-900"
             }`}
           >
@@ -303,7 +303,7 @@ export default function ChatbotButton() {
 
           {/* Chat Window */}
           {isOpen && (
-            <div className="fixed bottom-20 right-4 w-80 sm:w-96 h-[500px] bg-white rounded-xl shadow-xl z-40 flex flex-col">
+            <div className="fixed bottom-[110px] right-10 w-80 sm:w-96 h-[500px] bg-white rounded-xl shadow-xl z-40 flex flex-col">
               {/* Chat Header */}
               <div className="bg-yellow-400 text-gray-900 p-4 rounded-t-xl">
                 <div className="flex justify-between items-center">

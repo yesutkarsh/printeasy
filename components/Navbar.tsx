@@ -45,6 +45,9 @@ export default function Navbar() {
                 <Link href="/cart" className="font-inter text-gray-900 hover:text-blue-400 transition-colors">
                   Cart
                 </Link>
+                <Link href="/profile" className="font-inter text-gray-900 hover:text-blue-400 transition-colors">
+                  Profile
+                </Link>
                 <button
                   onClick={handleLogout}
                   className="font-inter text-gray-900 hover:text-blue-400 transition-colors"
@@ -114,6 +117,13 @@ export default function Navbar() {
                     onClick={() => setIsMenuOpen(false)}
                   >
                     Cart
+                  </Link>
+                  <Link
+                    href="/profile"
+                    className="font-inter text-gray-900 hover:text-blue-400 transition-colors"
+                    onClick={() => setIsMenuOpen(false)}
+                  >
+                    Profile
                   </Link>
                   <button
                     onClick={() => {

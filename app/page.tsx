@@ -229,7 +229,7 @@ export default function Home() {
               <div className="bg-gray-50 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow">
                 <div className="h-48 overflow-hidden">
                   <img
-                    src="/placeholder.svg?height=200&width=300"
+                    src="https://th.bing.com/th/id/OIP.5FsYTHgylSoAsIz0w3ZVywHaEu?rs=1&pid=ImgDetMain"
                     alt="Stationery"
                     className="w-full h-full object-cover transition-transform hover:scale-105"
                   />
@@ -252,7 +252,7 @@ export default function Home() {
               <div className="bg-gray-50 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow">
                 <div className="h-48 overflow-hidden">
                   <img
-                    src="/placeholder.svg?height=200&width=300"
+                    src="https://cdn.dribbble.com/users/336757/screenshots/17247155/dribbble_gift_4x.png"
                     alt="Gift Items"
                     className="w-full h-full object-cover transition-transform hover:scale-105"
                   />

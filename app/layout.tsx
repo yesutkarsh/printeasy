@@ -33,6 +33,8 @@ export default function RootLayout({
         />
           <Navbar />
           {children}
+          <ChatbotButton/>
+          <BottomNavigation/>
         </AuthProvider>
       </body>
     </html>
@@ -42,6 +44,8 @@ export default function RootLayout({
 
 
 import './globals.css'
+import BottomNavigation from "@/components/BottomNavigation"
+import ChatbotButton from "@/components/ChatbotButton"
 
 export const metadata = {
       generator: 'v0.dev'

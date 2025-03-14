@@ -1,13 +1,7 @@
 "use client"
 
 import { useState, useRef } from "react"
-import { uploadToCloudinary } from "@/lib/cloudinary"
-// In the imports, add this specific import for pdfjs
-import { pdfjs } from "react-pdf"
-
-// After the imports at the top of the file, initialize the PDF.js worker
-// Initialize PDF.js worker
-pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`
+import { estimatePdfPageCount } from "@/lib/pdfUtils"
 
 export default function FileUploader({ onFilesAdded }) {
   const fileInputRef = useRef(null)
@@ -72,15 +66,11 @@ export default function FileUploader({ onFilesAdded }) {
           continue
         }
 
-        // For PDF files, get page count
-        let pageCount = 0
+        // For PDF files, estimate page count based on file size
+        let pageCount = 1 // Default to 1 for non-PDF files
         if (file.type === "application/pdf") {
-          try {
-            pageCount = await getPdfPageCount(file)
-          } catch (error) {
-            console.error("Error getting PDF page count:", error)
-            pageCount = 1 // Default to 1 page if count fails
-          }
+          pageCount = estimatePdfPageCount(file.size)
+          console.log(`Estimated ${pageCount} pages for ${file.name} (${Math.round(file.size / 1024)} KB)`)
         }
 
         // Simulate upload progress
@@ -97,8 +87,15 @@ export default function FileUploader({ onFilesAdded }) {
           }))
         }, 300)
 
-        // Upload file to Cloudinary
-        const { url, publicId } = await uploadToCloudinary(file)
+        // Simulate Cloudinary upload
+        // In a real app, you would use the uploadToCloudinary function
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+
+        // Mock successful upload
+        const mockUploadResult = {
+          url: URL.createObjectURL(file),
+          publicId: `mock-public-id-${Date.now()}`,
+        }
 
         // Clear interval and set progress to 100%
         clearInterval(progressInterval)
@@ -110,9 +107,9 @@ export default function FileUploader({ onFilesAdded }) {
         // Add file to processed files
         processedFiles.push({
           ...file,
-          pageCount: pageCount || 1,
-          downloadURL: url || "",
-          publicId: publicId || "",
+          pageCount: pageCount,
+          downloadURL: mockUploadResult.url,
+          publicId: mockUploadResult.publicId,
           uploadTime: new Date().toISOString(),
         })
       } catch (error) {
@@ -129,34 +126,6 @@ export default function FileUploader({ onFilesAdded }) {
     if (processedFiles.length > 0) {
       onFilesAdded(processedFiles)
     }
-  }
-
-  const getPdfPageCount = (file) => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onload = async (event) => {
-        try {
-          const typedArray = new Uint8Array(event.target.result)
-
-          // Import and configure PDF.js
-          const pdfjs = await import("pdfjs-dist")
-          // Set the worker source
-          const workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`
-          pdfjs.GlobalWorkerOptions.workerSrc = workerSrc
-
-          // Get document and page count
-          const pdf = await pdfjs.getDocument(typedArray).promise
-          resolve(pdf.numPages)
-        } catch (error) {
-          console.error("Error getting PDF page count:", error)
-          reject(error)
-        }
-      }
-      reader.onerror = (error) => {
-        reject(error)
-      }
-      reader.readAsArrayBuffer(file)
-    })
   }
 
   const handleButtonClick = () => {

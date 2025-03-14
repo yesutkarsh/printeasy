@@ -14,13 +14,10 @@ export default function Customize() {
   const [files, setFiles] = useState([])
   const [loading, setLoading] = useState(true)
   const [customizations, setCustomizations] = useState({})
-  const [subtotal, setSubtotal] = useState(0)
   const [totalPrice, setTotalPrice] = useState(0)
   const [sessionId, setSessionId] = useState(null)
   const [error, setError] = useState("")
   const [selectedFileIndex, setSelectedFileIndex] = useState(null)
-
-  const DELIVERY_FEE = 70
 
   // Redirect if not authenticated
   useEffect(() => {
@@ -29,31 +26,36 @@ export default function Customize() {
     }
   }, [user, authLoading, router])
 
-  // Fetch upload session data
   useEffect(() => {
     const fetchUploadSession = async () => {
       try {
         const sessionId = localStorage.getItem("currentUploadSession")
+
         if (!sessionId) {
           router.push("/upload")
           return
         }
+
         setSessionId(sessionId)
+
         const sessionDoc = await getDoc(doc(db, "uploadSessions", sessionId))
+
         if (!sessionDoc.exists()) {
           router.push("/upload")
           return
         }
+
         const sessionData = sessionDoc.data()
         const filesData = sessionData.files || []
+
         setFiles(filesData)
 
-        // Initialize customizations with defaults
+        // Initialize customizations for each file
         const initialCustomizations = {}
         filesData.forEach((file, index) => {
           initialCustomizations[index] = {
             copies: 1,
-            paperType: "standard",
+            paperType: "75GSM",
             paperSize: "A4",
             colorMode: "blackAndWhite",
             coverOption: "noCover",
@@ -61,8 +63,14 @@ export default function Customize() {
             bindingOption: "noBinding",
           }
         })
+
         setCustomizations(initialCustomizations)
-        if (filesData.length > 0) setSelectedFileIndex(0)
+
+        // Set the first file as selected by default if there are files
+        if (filesData.length > 0) {
+          setSelectedFileIndex(0)
+        }
+
         setLoading(false)
       } catch (error) {
         console.error("Error fetching upload session:", error)
@@ -70,76 +78,85 @@ export default function Customize() {
         setLoading(false)
       }
     }
-    if (user && !authLoading) fetchUploadSession()
+
+    if (user && !authLoading) {
+      fetchUploadSession()
+    }
   }, [user, authLoading, router])
 
-  // Calculate subtotal and total price
   useEffect(() => {
-    let calculatedSubtotal = 0
-    files.forEach((file, index) => {
-      calculatedSubtotal += calculateFilePrice(index)
+    // Calculate total price based on customizations
+    let price = 0
+
+    Object.keys(customizations).forEach((fileIndex) => {
+      const file = files[fileIndex]
+      const options = customizations[fileIndex]
+
+      if (file && options) {
+        // Base price per page
+        let pricePerPage = 2 // Default price for 75GSM, B&W, single-sided
+
+        // Adjust price based on paper type
+        if (options.paperType === "85GSM") pricePerPage += 0.5
+
+        // Adjust price based on color mode
+        if (options.colorMode === "color") pricePerPage += 8
+
+        // Adjust price based on printing sides
+        if (options.printingSides === "doubleSided") pricePerPage += 1
+
+        // Calculate price for this file
+        const filePrice = file.pageCount * pricePerPage * options.copies
+
+        // Add binding cost if applicable
+        let bindingCost = 0
+        if (options.bindingOption === "softCover") bindingCost = 30
+
+        // Add cover cost if applicable
+        let coverCost = 0
+        if (options.coverOption === "thickColorCover") coverCost = 20
+
+        price += filePrice + bindingCost + coverCost
+      }
     })
-    setSubtotal(calculatedSubtotal)
-    setTotalPrice(calculatedSubtotal + DELIVERY_FEE)
+
+    setTotalPrice(price)
   }, [customizations, files])
 
-  // Function to calculate price per page based on options
-  const getPricePerPage = (options) => {
-    let pricePerPage = 2.5
-    if (options.colorMode === "color") pricePerPage += 2.4
-    if (options.paperType === "premium") pricePerPage += 3
-    else if (options.paperType === "ultraPremium") pricePerPage += 6
-    if (options.paperSize === "A3") pricePerPage += 2
-    if (options.printingSides === "doubleSided") pricePerPage += 1
-    return pricePerPage
-  }
-
-  // Calculate total price for a file
-  const calculateFilePrice = (fileIndex) => {
-    const file = files[fileIndex]
-    const options = customizations[fileIndex]
-    if (!file || !options) return 0
-
-    const pricePerPage = getPricePerPage(options)
-    const filePrice = file.pageCount * pricePerPage * options.copies
-    let bindingCost = options.bindingOption === "staplerBinding" ? 30 : options.bindingOption === "softCover" ? 120 : 0
-    let coverCost = options.coverOption === "customCover" ? 30 : 0
-
-    return filePrice + bindingCost + coverCost
-  }
-
-  // Handle changes to customization options
   const handleCustomizationChange = (fileIndex, field, value) => {
-    if (field === "copies") {
-      const numValue = Number.parseInt(value)
-      value = isNaN(numValue) ? 1 : Math.max(1, numValue)
-    }
-    setCustomizations((prev) => ({
-      ...prev,
-      [fileIndex]: { ...prev[fileIndex], [field]: value },
-    }))
-  }
-
-  // Apply preset options to a file
-  const applyPreset = (fileIndex, options) => {
     setCustomizations((prev) => ({
       ...prev,
       [fileIndex]: {
-        copies: prev[fileIndex]?.copies || 1,
-        ...options,
+        ...prev[fileIndex],
+        [field]: value,
       },
     }))
   }
 
-  // Handle order cancellation
   const handleCancel = async () => {
-    if (!confirm("Are you sure you want to cancel? All uploaded files will be deleted.")) return
+    if (!confirm("Are you sure you want to cancel? All uploaded files will be deleted.")) {
+      return
+    }
+
     setLoading(true)
+
     try {
+      // Mark files for deletion from Cloudinary
       for (const file of files) {
-        if (file.publicId) await trackFileForDeletion(file.publicId)
+        if (file.publicId) {
+          try {
+            await trackFileForDeletion(file.publicId)
+          } catch (error) {
+            console.error(`Failed to mark file ${file.name} for deletion:`, error)
+            // Continue with other files even if one fails
+          }
+        }
       }
+
+      // Clear localStorage
       localStorage.removeItem("currentUploadSession")
+
+      // Redirect to home
       router.push("/")
     } catch (error) {
       console.error("Error canceling order:", error)
@@ -148,28 +165,36 @@ export default function Customize() {
     }
   }
 
-  // Handle adding to cart
   const handleAddToCart = async () => {
     setLoading(true)
     setError("")
+
     try {
+      // Update the upload session with customizations
       await updateDoc(doc(db, "uploadSessions", sessionId), {
         customizations,
-        totalPrice: subtotal+DELIVERY_FEE,
+        totalPrice,
         updatedAt: new Date().toISOString(),
         status: "customized",
       })
+
+      // Add to cart in Firestore
       const cartItem = {
         sessionId,
         files,
         customizations,
-        totalPrice: subtotal+DELIVERY_FEE,
+        totalPrice,
         timestamp: new Date().toISOString(),
       }
+
+      // Store in localStorage for now (will be replaced with Firestore in cart page)
       const cart = JSON.parse(localStorage.getItem("cart") || "[]")
       cart.push(cartItem)
       localStorage.setItem("cart", JSON.stringify(cart))
+
+      // Clear current upload session
       localStorage.removeItem("currentUploadSession")
+
       router.push("/cart")
     } catch (error) {
       console.error("Error adding to cart:", error)
@@ -178,50 +203,38 @@ export default function Customize() {
     }
   }
 
-  // Define preset options
-  const presets = [
-    {
-      name: "Basic B&W",
-      description: "Normal paper, Black & White, A4, Single-sided",
-      options: {
-        paperType: "standard",
-        colorMode: "blackAndWhite",
-        paperSize: "A4",
-        printingSides: "singleSided",
-        coverOption: "noCover",
-        bindingOption: "noBinding",
-      },
-    },
-    {
-      name: "Color Print",
-      description: "Normal paper, Color, A4, Single-sided",
-      options: {
-        paperType: "standard",
-        colorMode: "color",
-        paperSize: "A4",
-        printingSides: "singleSided",
-        coverOption: "noCover",
-        bindingOption: "noBinding",
-      },
-    },
-    {
-      name: "Premium Color",
-      description: "Premium paper, Color, A4, Single-sided",
-      options: {
-        paperType: "premium",
-        colorMode: "color",
-        paperSize: "A4",
-        printingSides: "singleSided",
-        coverOption: "noCover",
-        bindingOption: "noBinding",
-      },
-    },
-  ].map(preset => ({
-    ...preset,
-    pricePerPage: getPricePerPage(preset.options)
-  }))
+  const calculateFilePrice = (fileIndex) => {
+    const file = files[fileIndex]
+    const options = customizations[fileIndex]
 
-  // Loading state
+    if (!file || !options) return 0
+
+    // Base price per page
+    let pricePerPage = 2
+
+    // Adjust price based on paper type
+    if (options.paperType === "85GSM") pricePerPage += 0.5
+
+    // Adjust price based on color mode
+    if (options.colorMode === "color") pricePerPage += 8
+
+    // Adjust price based on printing sides
+    if (options.printingSides === "doubleSided") pricePerPage += 1
+
+    // Calculate price for this file
+    const filePrice = file.pageCount * pricePerPage * options.copies
+
+    // Add binding cost if applicable
+    let bindingCost = 0
+    if (options.bindingOption === "softCover") bindingCost = 30
+
+    // Add cover cost if applicable
+    let coverCost = 0
+    if (options.coverOption === "thickColorCover") coverCost = 20
+
+    return filePrice + bindingCost + coverCost
+  }
+
   if (authLoading || loading) {
     return (
       <main className="bg-gray-100 min-h-screen flex items-center justify-center">
@@ -235,7 +248,7 @@ export default function Customize() {
 
   return (
     <main className="bg-gray-100 min-h-screen py-12 px-4">
-      {/* Header */}
+      {/* Header Section */}
       <section className="max-w-6xl mx-auto mb-12">
         <h1 className="font-poppins text-4xl md:text-5xl text-gray-900 text-center font-semibold mb-4">
           Customize Your Order
@@ -263,7 +276,7 @@ export default function Customize() {
         </div>
       )}
 
-      {/* Files List */}
+      {/* File Selection Section */}
       <section className="max-w-6xl mx-auto bg-white rounded-xl shadow-lg p-6 mb-8">
         <h2 className="font-poppins text-2xl text-gray-900 font-semibold mb-4">Your Files</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -271,7 +284,9 @@ export default function Customize() {
             <div
               key={index}
               className={`border rounded-lg p-4 cursor-pointer transition-all ${
-                selectedFileIndex === index ? "border-blue-400 bg-blue-50 shadow-md" : "border-gray-200 hover:border-blue-300"
+                selectedFileIndex === index
+                  ? "border-blue-400 bg-blue-50 shadow-md"
+                  : "border-gray-200 hover:border-blue-300"
               }`}
               onClick={() => setSelectedFileIndex(index)}
             >
@@ -288,9 +303,13 @@ export default function Customize() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="font-medium text-gray-900 truncate">{file.name}</p>
-                  <p className="text-sm text-gray-500">{file.pageCount} pages • {Math.round(file.size / 1024)} KB</p>
+                  <div className="flex items-center mt-1">
+                    <span className="bg-blue-100 text-blue-800 text-xs font-medium px-2 py-0.5 rounded">
+                      {file.pageCount} {file.pageCount === 1 ? "page" : "pages"}
+                    </span>
+                    <span className="text-sm text-gray-500 ml-2">{Math.round(file.size / 1024)} KB</span>
+                  </div>
                   <p className="text-sm font-medium text-blue-600 mt-1">₹{calculateFilePrice(index).toFixed(2)}</p>
-                  <p className="text-sm text-gray-500">₹{getPricePerPage(customizations[index]).toFixed(2)} per page</p>
                 </div>
               </div>
             </div>
@@ -317,29 +336,13 @@ export default function Customize() {
             </div>
           </div>
 
-          {/* Presets */}
-          <div className="mb-8">
-            <h3 className="font-poppins text-xl text-gray-900 font-semibold mb-4">Quick Presets</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              {presets.map((preset, index) => (
-                <button
-                  key={index}
-                  onClick={() => applyPreset(selectedFileIndex, preset.options)}
-                  className="bg-white border border-gray-200 rounded-lg p-4 hover:border-blue-400 transition-colors text-left shadow-sm hover:shadow-md"
-                >
-                  <h4 className="font-medium text-gray-900">{preset.name}</h4>
-                  <p className="text-sm text-gray-600">{preset.description}</p>
-                  <p className="text-sm font-semibold text-blue-600 mt-2">₹{preset.pricePerPage.toFixed(1)} per page</p>
-                </button>
-              ))}
-            </div>
-            <p className="text-sm text-gray-500 mt-4">Select a preset or customize manually below.</p>
-          </div>
-
-          {/* Customization Form */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Copies */}
             <div>
-              <label htmlFor={`copies-${selectedFileIndex}`} className="font-inter text-sm text-gray-700 font-medium block mb-1">
+              <label
+                htmlFor={`copies-${selectedFileIndex}`}
+                className="font-inter text-sm text-gray-700 font-medium block mb-1"
+              >
                 Number of Copies
               </label>
               <input
@@ -347,27 +350,38 @@ export default function Customize() {
                 type="number"
                 min="1"
                 value={customizations[selectedFileIndex]?.copies || 1}
-                onChange={(e) => handleCustomizationChange(selectedFileIndex, "copies", e.target.value)}
+                onChange={(e) =>
+                  handleCustomizationChange(selectedFileIndex, "copies", Number.parseInt(e.target.value))
+                }
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition-colors font-inter text-gray-900"
               />
             </div>
+
+            {/* Paper Type */}
             <div>
-              <label htmlFor={`paperType-${selectedFileIndex}`} className="font-inter text-sm text-gray-700 font-medium block mb-1">
+              <label
+                htmlFor={`paperType-${selectedFileIndex}`}
+                className="font-inter text-sm text-gray-700 font-medium block mb-1"
+              >
                 Paper Type
               </label>
               <select
                 id={`paperType-${selectedFileIndex}`}
-                value={customizations[selectedFileIndex]?.paperType || "standard"}
+                value={customizations[selectedFileIndex]?.paperType || "75GSM"}
                 onChange={(e) => handleCustomizationChange(selectedFileIndex, "paperType", e.target.value)}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition-colors font-inter text-gray-900"
               >
-                <option value="standard">Standard (75 GSM)</option>
-                <option value="premium">Premium (85 GSM)</option>
-                <option value="ultraPremium">Ultra-Premium (100 GSM)</option>
+                <option value="75GSM">75 GSM</option>
+                <option value="85GSM">85 GSM</option>
               </select>
             </div>
+
+            {/* Paper Size */}
             <div>
-              <label htmlFor={`paperSize-${selectedFileIndex}`} className="font-inter text-sm text-gray-700 font-medium block mb-1">
+              <label
+                htmlFor={`paperSize-${selectedFileIndex}`}
+                className="font-inter text-sm text-gray-700 font-medium block mb-1"
+              >
                 Paper Size
               </label>
               <select
@@ -377,13 +391,17 @@ export default function Customize() {
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition-colors font-inter text-gray-900"
               >
                 <option value="A4">A4</option>
-                <option value="A3">A3 (+2 rs per page)</option>
                 <option value="A5">A5</option>
                 <option value="Letter">Letter</option>
               </select>
             </div>
+
+            {/* Color Mode */}
             <div>
-              <label htmlFor={`colorMode-${selectedFileIndex}`} className="font-inter text-sm text-gray-700 font-medium block mb-1">
+              <label
+                htmlFor={`colorMode-${selectedFileIndex}`}
+                className="font-inter text-sm text-gray-700 font-medium block mb-1"
+              >
                 Color Mode
               </label>
               <select
@@ -396,8 +414,13 @@ export default function Customize() {
                 <option value="color">Color</option>
               </select>
             </div>
+
+            {/* Cover Option */}
             <div>
-              <label htmlFor={`coverOption-${selectedFileIndex}`} className="font-inter text-sm text-gray-700 font-medium block mb-1">
+              <label
+                htmlFor={`coverOption-${selectedFileIndex}`}
+                className="font-inter text-sm text-gray-700 font-medium block mb-1"
+              >
                 Cover Option
               </label>
               <select
@@ -407,14 +430,16 @@ export default function Customize() {
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition-colors font-inter text-gray-900"
               >
                 <option value="noCover">No Cover</option>
-                <option value="customCover">Custom Cover (30 rs)</option>
+                <option value="thickColorCover">Thick Color Cover</option>
               </select>
-              {customizations[selectedFileIndex]?.coverOption === "customCover" && (
-                <p className="text-sm text-gray-500 mt-1">The custom cover will be the first page of your PDF.</p>
-              )}
             </div>
+
+            {/* Printing Sides */}
             <div>
-              <label htmlFor={`printingSides-${selectedFileIndex}`} className="font-inter text-sm text-gray-700 font-medium block mb-1">
+              <label
+                htmlFor={`printingSides-${selectedFileIndex}`}
+                className="font-inter text-sm text-gray-700 font-medium block mb-1"
+              >
                 Printing Sides
               </label>
               <select
@@ -427,8 +452,13 @@ export default function Customize() {
                 <option value="doubleSided">Double-Sided</option>
               </select>
             </div>
+
+            {/* Binding Option */}
             <div>
-              <label htmlFor={`bindingOption-${selectedFileIndex}`} className="font-inter text-sm text-gray-700 font-medium block mb-1">
+              <label
+                htmlFor={`bindingOption-${selectedFileIndex}`}
+                className="font-inter text-sm text-gray-700 font-medium block mb-1"
+              >
                 Binding Option
               </label>
               <select
@@ -438,24 +468,26 @@ export default function Customize() {
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition-colors font-inter text-gray-900"
               >
                 <option value="noBinding">No Binding</option>
-                <option value="staplerBinding">Stapler Binding (30 rs)</option>
-                <option value="softCover">Soft Cover (120 rs)</option>
+                <option value="softCover">Soft Cover</option>
               </select>
             </div>
           </div>
         </section>
       )}
 
-      {/* Order Summary */}
+      {/* Order Summary Section */}
       <section className="max-w-6xl mx-auto bg-white rounded-xl shadow-lg p-6 mb-8">
         <h2 className="font-poppins text-2xl text-gray-900 font-semibold mb-4">Order Summary</h2>
         <div className="space-y-4">
           {files.map((file, index) => (
-            <div key={index} className="flex justify-between items-center border-b border-gray-100 pb-3 last:border-0 last:pb-0">
+            <div
+              key={index}
+              className="flex justify-between items-center border-b border-gray-100 pb-3 last:border-0 last:pb-0"
+            >
               <div>
                 <p className="font-medium text-gray-900">{file.name}</p>
                 <p className="text-sm text-gray-500">
-                  {customizations[index]?.copies || 1} {customizations[index]?.copies > 1 ? "copies" : "copy"} •
+                  {customizations[index]?.copies || 1} {(customizations[index]?.copies || 1) > 1 ? "copies" : "copy"} •
                   {customizations[index]?.paperSize || "A4"} •
                   {customizations[index]?.colorMode === "color" ? "Color" : "B&W"}
                 </p>
@@ -466,13 +498,9 @@ export default function Customize() {
         </div>
       </section>
 
-      {/* Total and Actions */}
+      {/* Total Price and Actions */}
       <section className="max-w-6xl mx-auto bg-white rounded-xl shadow-lg p-6 flex flex-col sm:flex-row gap-6 justify-between items-center">
-        <div>
-          <h2 className="font-poppins text-2xl text-gray-900 font-semibold">Subtotal: ₹{subtotal.toFixed(2)}</h2>
-          <p className="font-inter text-lg text-gray-700">Delivery Fee: ₹{DELIVERY_FEE.toFixed(2)}</p>
-          <h2 className="font-poppins text-2xl text-gray-900 font-semibold">Total: ₹{totalPrice.toFixed(2)}</h2>
-        </div>
+        <h2 className="font-poppins text-2xl text-gray-900 font-semibold">Total Price: ₹{totalPrice.toFixed(2)}</h2>
         <div className="flex flex-col sm:flex-row gap-4">
           <button
             onClick={handleAddToCart}
@@ -483,7 +511,12 @@ export default function Customize() {
           >
             {loading ? (
               <span className="flex items-center justify-center">
-                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-gray-900" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <svg
+                  className="animate-spin -ml-1 mr-3 h-5 w-5 text-gray-900"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                   <path
                     className="opacity-75"
@@ -498,12 +531,12 @@ export default function Customize() {
             )}
           </button>
           <div className="flex flex-col sm:flex-row gap-2">
-            {/* <Link
+            <Link
               href="/upload"
               className="bg-transparent border-2 border-blue-400 text-blue-400 font-inter text-lg px-8 py-4 rounded-lg hover:bg-blue-400 hover:text-white transition-colors text-center"
             >
               Upload More Files
-            </Link> */}
+            </Link>
             <button
               onClick={handleCancel}
               disabled={loading}
@@ -517,3 +550,4 @@ export default function Customize() {
     </main>
   )
 }
+

@@ -1,17 +1,9 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { Document, Page, pdfjs } from "react-pdf"
-import "react-pdf/dist/esm/Page/AnnotationLayer.css"
-import "react-pdf/dist/esm/Page/TextLayer.css"
-
-// Initialize PDF.js worker
-pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`
 
 export default function PdfPreviewModal({ file, onClose }) {
   const [pdfUrl, setPdfUrl] = useState("")
-  const [numPages, setNumPages] = useState(null)
-  const [pageNumber, setPageNumber] = useState(1)
   const [loading, setLoading] = useState(true)
   const modalRef = useRef(null)
   const [error, setError] = useState("")
@@ -37,21 +29,6 @@ export default function PdfPreviewModal({ file, onClose }) {
       }
     }
   }, [file])
-
-  const onDocumentLoadSuccess = ({ numPages }) => {
-    setNumPages(numPages)
-    setLoading(false)
-  }
-
-  const changePage = (offset) => {
-    setPageNumber((prevPageNumber) => {
-      const newPageNumber = prevPageNumber + offset
-      return Math.min(Math.max(1, newPageNumber), numPages || 1)
-    })
-  }
-
-  const previousPage = () => changePage(-1)
-  const nextPage = () => changePage(1)
 
   // Close modal when clicking outside
   useEffect(() => {
@@ -96,50 +73,18 @@ export default function PdfPreviewModal({ file, onClose }) {
           <div className="space-y-4">
             {file.type === "application/pdf" || (file.name && file.name.endsWith(".pdf")) ? (
               <div className="flex flex-col items-center">
-                <Document
-                  file={pdfUrl}
-                  onLoadSuccess={onDocumentLoadSuccess}
-                  loading={
-                    <div className="flex flex-col items-center justify-center py-12">
-                      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-yellow-400"></div>
-                      <p className="font-inter text-gray-600 text-center mt-4">Loading PDF...</p>
-                    </div>
-                  }
-                  error={
-                    <div className="text-center py-12">
-                      <p className="text-red-500 font-inter">Failed to load PDF. Please try again.</p>
-                    </div>
-                  }
-                >
-                  <Page
-                    pageNumber={pageNumber}
-                    width={Math.min(window.innerWidth * 0.8, 600)}
-                    renderTextLayer={true}
-                    renderAnnotationLayer={true}
-                  />
-                </Document>
-
-                {numPages && (
-                  <div className="flex items-center justify-between w-full mt-4">
-                    <button
-                      onClick={previousPage}
-                      disabled={pageNumber <= 1}
-                      className={`px-4 py-2 rounded-lg ${pageNumber <= 1 ? "bg-gray-200 text-gray-500" : "bg-blue-400 text-white hover:bg-blue-500"} transition-colors`}
-                    >
-                      Previous
-                    </button>
-                    <p className="font-inter text-gray-700">
-                      Page {pageNumber} of {numPages}
-                    </p>
-                    <button
-                      onClick={nextPage}
-                      disabled={pageNumber >= numPages}
-                      className={`px-4 py-2 rounded-lg ${pageNumber >= numPages ? "bg-gray-200 text-gray-500" : "bg-blue-400 text-white hover:bg-blue-500"} transition-colors`}
-                    >
-                      Next
-                    </button>
-                  </div>
-                )}
+                <iframe
+                  src={pdfUrl}
+                  className="w-full h-[500px] border border-gray-200 rounded-lg"
+                  title="PDF Preview"
+                />
+                <div className="bg-blue-50 text-blue-700 px-6 py-3 rounded-lg mt-4 text-center w-full">
+                  <p className="text-lg font-semibold">
+                    This PDF has approximately <span className="text-blue-800">{file.pageCount}</span>{" "}
+                    {file.pageCount === 1 ? "page" : "pages"}
+                  </p>
+                  <p className="text-xs mt-1 text-blue-600">Page count is estimated based on file size</p>
+                </div>
               </div>
             ) : (
               <img

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import FileUploader from "@/components/FileUploader"
 import PdfPreviewModal from "@/components/PdfPreviewModal"
 import { useAuth } from "@/contexts/AuthContext"
-import { collection, addDoc } from "firebase/firestore"
+import { collection, addDoc, getDoc, updateDoc, doc } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 // Update the import to use the new function name
 import { trackFileForDeletion } from "@/lib/cloudinary"
@@ -57,6 +57,7 @@ export default function Upload() {
     setCurrentPreviewIndex(null)
   }
 
+  // Update the handleContinue function to append files to existing session if it exists
   const handleContinue = async () => {
     if (files.length === 0) {
       setError("Please upload at least one file to continue.")
@@ -66,33 +67,74 @@ export default function Upload() {
     setLoading(true)
 
     try {
-      // Store files in Firestore
-      const filesData = files.map((file) => {
-        // Create a base object with default values where needed
-        const fileData = {
-          name: file.name || "Unnamed file",
-          type: file.type || "application/octet-stream",
-          size: file.size || 0,
-          pageCount: file.pageCount || 0,
-          uploadTime: file.uploadTime || new Date().toISOString(),
+      // Check if there's an existing session
+      const sessionId = localStorage.getItem("currentUploadSession")
+
+      if (sessionId) {
+        // Get existing session data
+        const sessionDoc = await getDoc(doc(db, "uploadSessions", sessionId))
+
+        if (sessionDoc.exists()) {
+          const sessionData = sessionDoc.data()
+          const existingFiles = sessionData.files || []
+
+          // Combine existing files with new files
+          const updatedFiles = [
+            ...existingFiles,
+            ...files.map((file) => {
+              // Create a base object with default values where needed
+              const fileData = {
+                name: file.name || "Unnamed file",
+                type: file.type || "application/octet-stream",
+                size: file.size || 0,
+                pageCount: file.pageCount || 0,
+                uploadTime: file.uploadTime || new Date().toISOString(),
+              }
+
+              // Only add properties that are defined
+              if (file.downloadURL) fileData.downloadURL = file.downloadURL
+              if (file.publicId) fileData.publicId = file.publicId
+
+              return fileData
+            }),
+          ]
+
+          // Update the session with combined files
+          await updateDoc(doc(db, "uploadSessions", sessionId), {
+            files: updatedFiles,
+            updatedAt: new Date().toISOString(),
+          })
         }
+      } else {
+        // No existing session, create a new one
+        // Store files in Firestore
+        const filesData = files.map((file) => {
+          // Create a base object with default values where needed
+          const fileData = {
+            name: file.name || "Unnamed file",
+            type: file.type || "application/octet-stream",
+            size: file.size || 0,
+            pageCount: file.pageCount || 0,
+            uploadTime: file.uploadTime || new Date().toISOString(),
+          }
 
-        // Only add properties that are defined
-        if (file.downloadURL) fileData.downloadURL = file.downloadURL
-        if (file.publicId) fileData.publicId = file.publicId
+          // Only add properties that are defined
+          if (file.downloadURL) fileData.downloadURL = file.downloadURL
+          if (file.publicId) fileData.publicId = file.publicId
 
-        return fileData
-      })
+          return fileData
+        })
 
-      const uploadSession = await addDoc(collection(db, "uploadSessions"), {
-        userId: user.uid,
-        files: filesData,
-        createdAt: new Date().toISOString(),
-        status: "pending",
-      })
+        const uploadSession = await addDoc(collection(db, "uploadSessions"), {
+          userId: user.uid,
+          files: filesData,
+          createdAt: new Date().toISOString(),
+          status: "pending",
+        })
 
-      // Store session ID in localStorage for the customize page
-      localStorage.setItem("currentUploadSession", uploadSession.id)
+        // Store session ID in localStorage for the customize page
+        localStorage.setItem("currentUploadSession", uploadSession.id)
+      }
 
       router.push("/customize")
     } catch (error) {

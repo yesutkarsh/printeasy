@@ -2,11 +2,67 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import Link from "next/link"
 import { useAuth } from "@/contexts/AuthContext"
 import { doc, getDoc, updateDoc } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import { trackFileForDeletion } from "@/lib/cloudinary"
+import { AlertCircle, Check, Info, Truck } from "lucide-react"
+
+// Add the import for the FileUploadModal at the top of the file
+import FileUploadModal from "@/components/FileUploadModal"
+
+// Define preset configurations
+const PRESETS = [
+  {
+    id: "preset1",
+    name: "Economy B&W",
+    description: "Double-sided B&W printing on A4 paper",
+    icon: "💰",
+    pricePerPage: 2.5,
+    config: {
+      paperType: "75GSM",
+      paperSize: "A4",
+      colorMode: "blackAndWhite",
+      coverOption: "noCover",
+      printingSides: "doubleSided",
+      bindingOption: "noBinding",
+    },
+  },
+  {
+    id: "preset2",
+    name: "Standard Color",
+    description: "Double-sided color printing on A4 paper",
+    icon: "🌈",
+    pricePerPage: 5.5,
+    config: {
+      paperType: "75GSM",
+      paperSize: "A4",
+      colorMode: "color",
+      coverOption: "noCover",
+      printingSides: "doubleSided",
+      bindingOption: "noBinding",
+    },
+  },
+  {
+    id: "preset3",
+    name: "Premium B&W",
+    description: "Single-sided B&W printing on A4 paper",
+    icon: "✨",
+    pricePerPage: 4.5,
+    config: {
+      paperType: "75GSM",
+      paperSize: "A4",
+      colorMode: "blackAndWhite",
+      coverOption: "noCover",
+      printingSides: "singleSided",
+      bindingOption: "noBinding",
+    },
+  },
+]
+
+// Constants
+const DELIVERY_CHARGE = 70
+const MIN_ORDER_VALUE = 199
 
 export default function Customize() {
   const router = useRouter()
@@ -14,10 +70,23 @@ export default function Customize() {
   const [files, setFiles] = useState([])
   const [loading, setLoading] = useState(true)
   const [customizations, setCustomizations] = useState({})
+  const [subtotal, setSubtotal] = useState(0)
   const [totalPrice, setTotalPrice] = useState(0)
   const [sessionId, setSessionId] = useState(null)
   const [error, setError] = useState("")
   const [selectedFileIndex, setSelectedFileIndex] = useState(null)
+  const [selectedPreset, setSelectedPreset] = useState(null)
+  const [customMode, setCustomMode] = useState(false)
+
+  // Add a new state for the modal visibility after the other state declarations
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false)
+
+  const [priceBreakdown, setPriceBreakdown] = useState({
+    subtotal: 0,
+    deliveryCharge: DELIVERY_CHARGE,
+    total: 0,
+    items: [],
+  })
 
   // Redirect if not authenticated
   useEffect(() => {
@@ -61,6 +130,7 @@ export default function Customize() {
             coverOption: "noCover",
             printingSides: "singleSided",
             bindingOption: "noBinding",
+            pricePerPage: 2, // Default price
           }
         })
 
@@ -86,7 +156,8 @@ export default function Customize() {
 
   useEffect(() => {
     // Calculate total price based on customizations
-    let price = 0
+    let subtotalPrice = 0
+    const itemBreakdown = []
 
     Object.keys(customizations).forEach((fileIndex) => {
       const file = files[fileIndex]
@@ -94,19 +165,12 @@ export default function Customize() {
 
       if (file && options) {
         // Base price per page
-        let pricePerPage = 2 // Default price for 75GSM, B&W, single-sided
-
-        // Adjust price based on paper type
-        if (options.paperType === "85GSM") pricePerPage += 0.5
-
-        // Adjust price based on color mode
-        if (options.colorMode === "color") pricePerPage += 8
-
-        // Adjust price based on printing sides
-        if (options.printingSides === "doubleSided") pricePerPage += 1
+        const pricePerPage = options.pricePerPage || 2 // Use preset price if available
 
         // Calculate price for this file
-        const filePrice = file.pageCount * pricePerPage * options.copies
+        const copies = options.copies || 1
+        const pageCount = file.pageCount || 1
+        const filePrice = pageCount * pricePerPage * copies
 
         // Add binding cost if applicable
         let bindingCost = 0
@@ -116,11 +180,33 @@ export default function Customize() {
         let coverCost = 0
         if (options.coverOption === "thickColorCover") coverCost = 20
 
-        price += filePrice + bindingCost + coverCost
+        const itemTotal = filePrice + bindingCost + coverCost
+        subtotalPrice += itemTotal
+
+        // Add to breakdown
+        itemBreakdown.push({
+          name: file.name,
+          pageCount,
+          copies,
+          pricePerPage,
+          bindingCost,
+          coverCost,
+          total: itemTotal,
+        })
       }
     })
 
-    setTotalPrice(price)
+    // Update price breakdown
+    const breakdown = {
+      subtotal: subtotalPrice,
+      deliveryCharge: DELIVERY_CHARGE,
+      total: subtotalPrice + DELIVERY_CHARGE,
+      items: itemBreakdown,
+    }
+
+    setPriceBreakdown(breakdown)
+    setSubtotal(subtotalPrice)
+    setTotalPrice(subtotalPrice + DELIVERY_CHARGE)
   }, [customizations, files])
 
   const handleCustomizationChange = (fileIndex, field, value) => {
@@ -131,6 +217,34 @@ export default function Customize() {
         [field]: value,
       },
     }))
+  }
+
+  const applyPresetToFile = (fileIndex, preset) => {
+    setCustomizations((prev) => ({
+      ...prev,
+      [fileIndex]: {
+        ...prev[fileIndex],
+        ...preset.config,
+        pricePerPage: preset.pricePerPage,
+      },
+    }))
+  }
+
+  const applyPresetToAll = (preset) => {
+    const updatedCustomizations = {}
+
+    files.forEach((_, index) => {
+      updatedCustomizations[index] = {
+        ...customizations[index],
+        ...preset.config,
+        pricePerPage: preset.pricePerPage,
+        copies: customizations[index]?.copies || 1, // Preserve copies
+      }
+    })
+
+    setCustomizations(updatedCustomizations)
+    setSelectedPreset(preset.id)
+    setCustomMode(false)
   }
 
   const handleCancel = async () => {
@@ -165,7 +279,39 @@ export default function Customize() {
     }
   }
 
+  // Add a new function to handle adding more files after the other handler functions
+  const handleAddMoreFiles = (newFiles) => {
+    // Combine existing files with new files
+    setFiles((prevFiles) => [...prevFiles, ...newFiles])
+
+    // Initialize customizations for new files
+    const updatedCustomizations = { ...customizations }
+    newFiles.forEach((_, index) => {
+      const newIndex = files.length + index
+      updatedCustomizations[newIndex] = {
+        copies: 1,
+        paperType: "75GSM",
+        paperSize: "A4",
+        colorMode: "blackAndWhite",
+        coverOption: "noCover",
+        printingSides: "singleSided",
+        bindingOption: "noBinding",
+        pricePerPage: 2, // Default price
+      }
+    })
+
+    setCustomizations(updatedCustomizations)
+  }
+
   const handleAddToCart = async () => {
+    // Check minimum order value
+    if (subtotal < MIN_ORDER_VALUE) {
+      setError(
+        `Minimum order value is ₹${MIN_ORDER_VALUE} (excluding delivery charges). Please add more items or copies.`,
+      )
+      return
+    }
+
     setLoading(true)
     setError("")
 
@@ -173,6 +319,8 @@ export default function Customize() {
       // Update the upload session with customizations
       await updateDoc(doc(db, "uploadSessions", sessionId), {
         customizations,
+        subtotal,
+        deliveryCharge: DELIVERY_CHARGE,
         totalPrice,
         updatedAt: new Date().toISOString(),
         status: "customized",
@@ -183,6 +331,8 @@ export default function Customize() {
         sessionId,
         files,
         customizations,
+        subtotal,
+        deliveryCharge: DELIVERY_CHARGE,
         totalPrice,
         timestamp: new Date().toISOString(),
       }
@@ -209,20 +359,11 @@ export default function Customize() {
 
     if (!file || !options) return 0
 
-    // Base price per page
-    let pricePerPage = 2
-
-    // Adjust price based on paper type
-    if (options.paperType === "85GSM") pricePerPage += 0.5
-
-    // Adjust price based on color mode
-    if (options.colorMode === "color") pricePerPage += 8
-
-    // Adjust price based on printing sides
-    if (options.printingSides === "doubleSided") pricePerPage += 1
+    // Use preset price if available
+    const pricePerPage = options.pricePerPage || 2
 
     // Calculate price for this file
-    const filePrice = file.pageCount * pricePerPage * options.copies
+    const filePrice = file.pageCount * pricePerPage * (options.copies || 1)
 
     // Add binding cost if applicable
     let bindingCost = 0
@@ -254,7 +395,7 @@ export default function Customize() {
           Customize Your Order
         </h1>
         <p className="font-inter text-lg md:text-xl text-gray-700 text-center max-w-2xl mx-auto">
-          Tailor your prints with options for paper, color, binding, and more!
+          Choose a preset or customize your prints with options for paper, color, binding, and more!
         </p>
       </section>
 
@@ -263,18 +404,22 @@ export default function Customize() {
         <div className="max-w-6xl mx-auto mb-6">
           <div className="bg-red-50 border-l-4 border-red-400 p-4 rounded-lg">
             <p className="font-inter text-sm text-red-700 flex items-center">
-              <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                <path
-                  fillRule="evenodd"
-                  d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
-                  clipRule="evenodd"
-                />
-              </svg>
+              <AlertCircle className="w-5 h-5 mr-2" />
               {error}
             </p>
           </div>
         </div>
       )}
+
+      {/* Minimum Order Value Notice */}
+      <div className="max-w-6xl mx-auto mb-6">
+        <div className="bg-blue-50 border-l-4 border-blue-400 p-4 rounded-lg">
+          <p className="font-inter text-sm text-blue-700 flex items-center">
+            <Info className="w-5 h-5 mr-2" />
+            Minimum order value is ₹{MIN_ORDER_VALUE} (excluding delivery charges).
+          </p>
+        </div>
+      </div>
 
       {/* File Selection Section */}
       <section className="max-w-6xl mx-auto bg-white rounded-xl shadow-lg p-6 mb-8">
@@ -285,7 +430,7 @@ export default function Customize() {
               key={index}
               className={`border rounded-lg p-4 cursor-pointer transition-all ${
                 selectedFileIndex === index
-                  ? "border-blue-400 bg-blue-50 shadow-md"
+                  ? "border-blue-400 bg-blue-50 shadow-md transform scale-[1.02]"
                   : "border-gray-200 hover:border-blue-300"
               }`}
               onClick={() => setSelectedFileIndex(index)}
@@ -312,13 +457,66 @@ export default function Customize() {
                   <p className="text-sm font-medium text-blue-600 mt-1">₹{calculateFilePrice(index).toFixed(2)}</p>
                 </div>
               </div>
+              {selectedFileIndex === index && (
+                <div className="mt-2 text-xs text-blue-600 flex items-center justify-center">
+                  <span className="bg-blue-100 px-2 py-1 rounded-full">Currently Editing</span>
+                </div>
+              )}
             </div>
           ))}
         </div>
       </section>
 
-      {/* Customization Section */}
-      {selectedFileIndex !== null && (
+      {/* Preset Selection Section */}
+      <section className="max-w-6xl mx-auto bg-white rounded-xl shadow-lg p-6 mb-8">
+        <h2 className="font-poppins text-2xl text-gray-900 font-semibold mb-4">Choose a Preset</h2>
+        <p className="text-gray-600 mb-6">Select a preset configuration or customize your own settings.</p>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          {PRESETS.map((preset) => (
+            <div
+              key={preset.id}
+              onClick={() => applyPresetToAll(preset)}
+              className={`border rounded-lg p-4 cursor-pointer transition-all ${
+                selectedPreset === preset.id && !customMode
+                  ? "border-yellow-400 bg-yellow-50 shadow-md"
+                  : "border-gray-200 hover:border-yellow-300"
+              }`}
+            >
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center">
+                  <span className="text-2xl mr-2">{preset.icon}</span>
+                  <h3 className="font-medium text-gray-900">{preset.name}</h3>
+                </div>
+                {selectedPreset === preset.id && !customMode && (
+                  <span className="bg-yellow-400 rounded-full p-1">
+                    <Check className="w-4 h-4 text-white" />
+                  </span>
+                )}
+              </div>
+              <p className="text-sm text-gray-600 mb-2">{preset.description}</p>
+              <p className="text-sm font-medium text-yellow-600">₹{preset.pricePerPage} per page</p>
+            </div>
+          ))}
+        </div>
+
+        <div className="flex justify-center">
+          <button
+            onClick={() => {
+              setCustomMode(true)
+              setSelectedPreset(null)
+            }}
+            className={`px-4 py-2 rounded-lg transition-colors ${
+              customMode ? "bg-blue-500 text-white" : "bg-gray-200 text-gray-700 hover:bg-blue-100"
+            }`}
+          >
+            {customMode ? "Custom Mode (Active)" : "I want to customize"}
+          </button>
+        </div>
+      </section>
+
+      {/* Customization Section - Only show if custom mode is active */}
+      {customMode && selectedFileIndex !== null && (
         <section className="max-w-6xl mx-auto bg-white rounded-xl shadow-lg p-8 mb-8">
           <div className="flex justify-between items-start mb-6">
             <div>
@@ -407,7 +605,12 @@ export default function Customize() {
               <select
                 id={`colorMode-${selectedFileIndex}`}
                 value={customizations[selectedFileIndex]?.colorMode || "blackAndWhite"}
-                onChange={(e) => handleCustomizationChange(selectedFileIndex, "colorMode", e.target.value)}
+                onChange={(e) => {
+                  handleCustomizationChange(selectedFileIndex, "colorMode", e.target.value)
+                  // Update price per page based on color mode
+                  const newPricePerPage = e.target.value === "color" ? 10 : 2
+                  handleCustomizationChange(selectedFileIndex, "pricePerPage", newPricePerPage)
+                }}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition-colors font-inter text-gray-900"
               >
                 <option value="blackAndWhite">Black & White</option>
@@ -472,41 +675,111 @@ export default function Customize() {
               </select>
             </div>
           </div>
+
+          {/* Apply to all files button */}
+          {files.length > 1 && (
+            <div className="mt-6 flex justify-center">
+              <button
+                onClick={() => {
+                  const currentConfig = customizations[selectedFileIndex]
+                  const updatedCustomizations = {}
+
+                  files.forEach((_, index) => {
+                    updatedCustomizations[index] = {
+                      ...currentConfig,
+                      copies: customizations[index]?.copies || 1, // Preserve copies
+                    }
+                  })
+
+                  setCustomizations(updatedCustomizations)
+                }}
+                className="px-4 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors"
+              >
+                Apply these settings to all files
+              </button>
+            </div>
+          )}
         </section>
       )}
 
-      {/* Order Summary Section */}
+      {/* Price Breakdown Section */}
       <section className="max-w-6xl mx-auto bg-white rounded-xl shadow-lg p-6 mb-8">
-        <h2 className="font-poppins text-2xl text-gray-900 font-semibold mb-4">Order Summary</h2>
-        <div className="space-y-4">
-          {files.map((file, index) => (
-            <div
-              key={index}
-              className="flex justify-between items-center border-b border-gray-100 pb-3 last:border-0 last:pb-0"
-            >
-              <div>
-                <p className="font-medium text-gray-900">{file.name}</p>
-                <p className="text-sm text-gray-500">
-                  {customizations[index]?.copies || 1} {(customizations[index]?.copies || 1) > 1 ? "copies" : "copy"} •
-                  {customizations[index]?.paperSize || "A4"} •
-                  {customizations[index]?.colorMode === "color" ? "Color" : "B&W"}
-                </p>
+        <h2 className="font-poppins text-2xl text-gray-900 font-semibold mb-4">Price Breakdown</h2>
+
+        <div className="space-y-6">
+          {/* Items breakdown */}
+          <div className="space-y-4">
+            {priceBreakdown.items.map((item, index) => (
+              <div key={index} className="border-b border-gray-100 pb-4 last:border-0">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <p className="font-medium text-gray-900 truncate max-w-md">{item.name}</p>
+                    <div className="text-sm text-gray-600 mt-1 space-y-1">
+                      <p>
+                        {item.pageCount} pages × {item.copies} {item.copies > 1 ? "copies" : "copy"} × ₹
+                        {item.pricePerPage.toFixed(2)}/page = ₹
+                        {(item.pageCount * item.copies * item.pricePerPage).toFixed(2)}
+                      </p>
+                      {item.bindingCost > 0 && <p>Binding: ₹{item.bindingCost.toFixed(2)}</p>}
+                      {item.coverCost > 0 && <p>Cover: ₹{item.coverCost.toFixed(2)}</p>}
+                    </div>
+                  </div>
+                  <p className="font-medium text-gray-900">₹{item.total.toFixed(2)}</p>
+                </div>
               </div>
-              <p className="font-medium text-gray-900">₹{calculateFilePrice(index).toFixed(2)}</p>
+            ))}
+          </div>
+
+          {/* Subtotal */}
+          <div className="flex justify-between border-t border-gray-200 pt-4">
+            <p className="font-medium text-gray-700">Subtotal</p>
+            <p className="font-medium text-gray-900">₹{priceBreakdown.subtotal.toFixed(2)}</p>
+          </div>
+
+          {/* Delivery charge */}
+          <div className="flex justify-between items-center">
+            <div className="flex items-center">
+              <Truck className="w-5 h-5 text-gray-500 mr-2" />
+              <p className="font-medium text-gray-700">Delivery Charge</p>
             </div>
-          ))}
+            <p className="font-medium text-gray-900">₹{priceBreakdown.deliveryCharge.toFixed(2)}</p>
+          </div>
+
+          {/* Total */}
+          <div className="flex justify-between border-t border-gray-200 pt-4">
+            <p className="font-bold text-lg text-gray-900">Total</p>
+            <p className="font-bold text-lg text-gray-900">₹{priceBreakdown.total.toFixed(2)}</p>
+          </div>
+
+          {/* Minimum order warning */}
+          {subtotal < MIN_ORDER_VALUE && (
+            <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded-lg">
+              <div className="flex">
+                <AlertCircle className="h-5 w-5 text-yellow-400" />
+                <div className="ml-3">
+                  <p className="text-sm text-yellow-700">
+                    Your order subtotal (₹{subtotal.toFixed(2)}) is below the minimum order value of ₹{MIN_ORDER_VALUE}.
+                    Please add more items or copies to proceed.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </section>
 
       {/* Total Price and Actions */}
       <section className="max-w-6xl mx-auto bg-white rounded-xl shadow-lg p-6 flex flex-col sm:flex-row gap-6 justify-between items-center">
-        <h2 className="font-poppins text-2xl text-gray-900 font-semibold">Total Price: ₹{totalPrice.toFixed(2)}</h2>
+        <div>
+          <h2 className="font-poppins text-2xl text-gray-900 font-semibold">Total: ₹{totalPrice.toFixed(2)}</h2>
+          <p className="text-sm text-gray-600">Including ₹{DELIVERY_CHARGE} delivery charge</p>
+        </div>
         <div className="flex flex-col sm:flex-row gap-4">
           <button
             onClick={handleAddToCart}
-            disabled={loading}
+            disabled={loading || subtotal < MIN_ORDER_VALUE}
             className={`bg-yellow-400 text-gray-900 font-inter text-lg px-8 py-4 rounded-lg shadow-md transition-colors ${
-              loading ? "opacity-70 cursor-not-allowed" : "hover:bg-opacity-80"
+              loading || subtotal < MIN_ORDER_VALUE ? "opacity-70 cursor-not-allowed" : "hover:bg-opacity-80"
             }`}
           >
             {loading ? (
@@ -531,12 +804,12 @@ export default function Customize() {
             )}
           </button>
           <div className="flex flex-col sm:flex-row gap-2">
-            <Link
-              href="/upload"
+            <button
+              onClick={() => setIsUploadModalOpen(true)}
               className="bg-transparent border-2 border-blue-400 text-blue-400 font-inter text-lg px-8 py-4 rounded-lg hover:bg-blue-400 hover:text-white transition-colors text-center"
             >
               Upload More Files
-            </Link>
+            </button>
             <button
               onClick={handleCancel}
               disabled={loading}
@@ -547,6 +820,12 @@ export default function Customize() {
           </div>
         </div>
       </section>
+      {/* File Upload Modal */}
+      <FileUploadModal
+        isOpen={isUploadModalOpen}
+        onClose={() => setIsUploadModalOpen(false)}
+        onFilesAdded={handleAddMoreFiles}
+      />
     </main>
   )
 }

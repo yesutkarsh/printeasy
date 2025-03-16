@@ -305,7 +305,7 @@ export default function Customize() {
 
   const handleAddToCart = async () => {
     // Check minimum order value
-    if (subtotal < MIN_ORDER_VALUE) {
+    if (totalPrice < MIN_ORDER_VALUE) {
       setError(
         `Minimum order value is ₹${MIN_ORDER_VALUE} (excluding delivery charges). Please add more items or copies.`,
       )

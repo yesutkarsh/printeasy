@@ -51,6 +51,7 @@ module.exports = {
         },
         gray: {
           900: "#212121", // Contrast - Deep Black
+          950: "#121212", // Darker black for backgrounds
           100: "#F5F5F5", // Background - Light Gray
         },
         borderRadius: {
@@ -64,6 +65,9 @@ module.exports = {
         poppins: ["var(--font-poppins)", "sans-serif"],
         inter: ["var(--font-inter)", "sans-serif"],
         roboto: ["var(--font-roboto)", "sans-serif"],
+      },
+      animation: {
+        "pulse-slow": "pulse-slow 3s cubic-bezier(0.4, 0, 0.6, 1) infinite",
       },
     },
   },
